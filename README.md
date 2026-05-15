@@ -11,6 +11,8 @@ A lightweight Edge/Chrome extension to download TikTok and Douyin videos and ima
 
 [English](#english) | [中文](#中文)
 
+</div>
+
 ---
 
 <a id="english"></a>
