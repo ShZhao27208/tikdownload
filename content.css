@@ -1,0 +1,43 @@
+.tikdownload-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 36px;
+  height: 36px;
+  cursor: pointer;
+  z-index: 999;
+  display: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  padding: 8px;
+  transition: transform 0.2s, opacity 0.2s, background 0.2s;
+  align-items: center;
+  justify-content: center;
+}
+
+.tikdownload-btn:hover {
+  transform: scale(1.15);
+  background: rgba(254, 44, 85, 0.8);
+}
+
+.tikdownload-btn-fixed {
+  position: fixed !important;
+  top: 80px !important;
+  right: 20px !important;
+  z-index: 2147483647 !important;
+  display: flex !important;
+  width: 44px !important;
+  height: 44px !important;
+  cursor: pointer;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.7);
+  padding: 10px;
+  transition: transform 0.2s, background 0.2s;
+  align-items: center;
+  justify-content: center;
+}
+
+.tikdownload-btn-fixed:hover {
+  transform: scale(1.15);
+  background: rgba(254, 44, 85, 0.8);
+}
