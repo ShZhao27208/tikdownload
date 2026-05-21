@@ -182,7 +182,13 @@ function pickBestImageUrl(urlList) {
 
 // --- Build filename ---
 function sanitize(name) {
-  return name.replace(/[<>:"/\\|?*\n\r\t]/g, '_').replace(/_+/g, '_').trim().substring(0, 150);
+  return name
+    .replace(/[<>:"/\\|?*#\n\r\t]/g, '_')
+    .replace(/[。，！？；：""''【】《》（）～…·]/g, '_')
+    .replace(/\s+/g, ' ')
+    .replace(/_+/g, '_')
+    .replace(/^[.\s_]+|[.\s_]+$/g, '')
+    .substring(0, 150) || 'untitled';
 }
 
 async function buildFilename(info, url, index) {
