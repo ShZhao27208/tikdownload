@@ -3,7 +3,7 @@
   "name": "TikDownload",
   "version": "1.0.1",
   "description": "Download TikTok and Douyin videos/images with one click.",
-  "permissions": ["storage", "downloads", "webRequest"],
+  "permissions": ["storage", "downloads", "notifications", "webRequest"],
   "host_permissions": ["*://*.tiktok.com/*", "*://*.douyin.com/*", "*://*.douyinvod.com/*", "*://*.tiktokcdn.com/*"],
   "background": {
     "service_worker": "background.js"
@@ -24,6 +24,7 @@
       "128": "icons/128.png"
     }
   },
+  "options_page": "options.html",
   "icons": {
     "16": "icons/16.png",
     "48": "icons/48.png",

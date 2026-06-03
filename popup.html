@@ -2,87 +2,164 @@
 <html lang="zh">
 <head>
   <meta charset="UTF-8">
-  <title>TikDownload Settings</title>
+  <title>TikDownload</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { width: 360px; font-family: -apple-system, sans-serif; font-size: 13px; background: #1a1a1a; color: #eee; }
-    .container { padding: 16px; }
-    h1 { font-size: 15px; font-weight: 700; margin-bottom: 14px; background: linear-gradient(90deg, #25f4ee, #fe2c55); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-    h2 { font-size: 12px; color: #aaa; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
-    .field { margin-bottom: 14px; }
-    .field label { display: block; font-size: 11px; color: #aaa; margin-bottom: 4px; }
-    .field input, .field select { width: 100%; padding: 8px 10px; border: 1px solid #333; border-radius: 6px; background: #222; color: #eee; font-size: 13px; outline: none; }
-    .field input:focus { border-color: #25f4ee; }
-    .field small { display: block; margin-top: 3px; font-size: 10px; color: #666; }
+    body {
+      width: 340px;
+      font-family: -apple-system, sans-serif;
+      font-size: 13px;
+      background: #1a1a1a;
+      color: #eee;
+      padding: 16px;
+    }
+    h1 {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 4px;
+      background: linear-gradient(90deg, #25f4ee, #fe2c55);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .subtitle { font-size: 11px; color: #666; margin-bottom: 16px; }
 
-    /* Building blocks */
-    .blocks-area { min-height: 40px; padding: 8px; border: 2px dashed #333; border-radius: 8px; margin-bottom: 10px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-    .blocks-area.dragover { border-color: #25f4ee; background: rgba(37,244,238,0.05); }
-    .block { padding: 4px 10px; border-radius: 4px; font-size: 12px; cursor: grab; user-select: none; display: inline-flex; align-items: center; gap: 4px; }
-    .block:active { cursor: grabbing; }
-    .block .remove { cursor: pointer; opacity: 0.6; font-size: 14px; }
-    .block .remove:hover { opacity: 1; }
-    .block-caption { background: #2d4a3e; color: #4caf50; }
-    .block-date { background: #3d3a2a; color: #ffc107; }
-    .block-author { background: #2a2d4a; color: #5c9aff; }
-    .block-vid { background: #4a2a3d; color: #e91e63; }
-    .block-index { background: #3d2a4a; color: #ab47bc; }
-    .block-separator { background: #333; color: #888; }
+    .stats {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 16px;
+      padding: 12px;
+      background: #222;
+      border-radius: 8px;
+    }
+    .stat {
+      flex: 1;
+      text-align: center;
+    }
+    .stat-val {
+      font-size: 20px;
+      font-weight: 700;
+      color: #25f4ee;
+      display: block;
+    }
+    .stat-label {
+      font-size: 10px;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-top: 2px;
+    }
 
-    .available-blocks { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
-    .available-blocks .block { opacity: 0.7; cursor: pointer; }
-    .available-blocks .block:hover { opacity: 1; transform: scale(1.05); }
+    .actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .btn {
+      padding: 10px;
+      border: none;
+      border-radius: 7px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.1s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    .btn:hover { opacity: 0.9; transform: translateY(-1px); }
+    .btn:active { transform: translateY(0); }
+    .btn-primary {
+      background: linear-gradient(135deg, #25f4ee, #fe2c55);
+      color: #fff;
+      grid-column: span 2;
+    }
+    .btn-secondary {
+      background: #2a2a2a;
+      color: #ccc;
+      border: 1px solid #3a3a3a;
+    }
 
-    .preview { padding: 8px; background: #222; border-radius: 6px; font-size: 11px; color: #888; word-break: break-all; margin-bottom: 14px; }
-    .preview span { color: #25f4ee; }
+    .field {
+      margin-bottom: 14px;
+    }
+    .field label {
+      display: block;
+      font-size: 11px;
+      color: #aaa;
+      margin-bottom: 5px;
+      font-weight: 500;
+    }
+    .field select {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #333;
+      border-radius: 6px;
+      background: #222;
+      color: #eee;
+      font-size: 12px;
+      outline: none;
+    }
+    .field select:focus { border-color: #25f4ee; }
 
-    .btn { width: 100%; padding: 10px; border: none; border-radius: 8px; background: linear-gradient(135deg, #25f4ee, #fe2c55); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; }
-    .btn:hover { opacity: 0.9; }
-    .status { margin-top: 10px; font-size: 12px; text-align: center; color: #25f4ee; min-height: 16px; }
-    .sep { margin: 14px 0; border: none; border-top: 1px solid #333; }
+    .sep { margin: 14px 0; border: none; border-top: 1px solid #2a2a2a; }
+
+    .link {
+      display: block;
+      text-align: center;
+      font-size: 11px;
+      color: #25f4ee;
+      text-decoration: none;
+      padding: 8px;
+      border-radius: 6px;
+      transition: background 0.15s;
+    }
+    .link:hover { background: #222; }
+
+    .status {
+      text-align: center;
+      font-size: 11px;
+      color: #4caf50;
+      min-height: 14px;
+      margin-top: 8px;
+    }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>TikDownload</h1>
+  <h1>✦ TikDownload</h1>
+  <p class="subtitle">本次会话</p>
 
-    <div class="field">
-      <label>Save Folder</label>
-      <input type="text" id="folder" placeholder="TikDownload">
-      <small>Relative to browser download directory</small>
+  <div class="stats">
+    <div class="stat">
+      <span class="stat-val" id="downloaded">0</span>
+      <span class="stat-label">已下载</span>
     </div>
-
-    <hr class="sep">
-    <h2>Filename Rules (drag to reorder)</h2>
-
-    <div class="blocks-area" id="active-blocks"></div>
-
-    <p style="font-size:11px;color:#666;margin-bottom:8px;">Click to add:</p>
-    <div class="available-blocks" id="available-blocks">
-      <span class="block block-caption" data-type="caption">Title</span>
-      <span class="block block-date" data-type="date">Date</span>
-      <span class="block block-author" data-type="author">Author</span>
-      <span class="block block-vid" data-type="vid">Video ID</span>
-      <span class="block block-index" data-type="index">Index</span>
-      <span class="block block-separator" data-type="sep_">Separator _</span>
-      <span class="block block-separator" data-type="sep-">Separator -</span>
+    <div class="stat">
+      <span class="stat-val" id="failed">0</span>
+      <span class="stat-label">失败</span>
     </div>
-
-    <p style="font-size:11px;color:#666;margin-bottom:4px;">Preview:</p>
-    <div class="preview" id="preview"></div>
-
-    <hr class="sep">
-    <div class="field">
-      <label>Video Quality</label>
-      <select id="quality">
-        <option value="highest">Highest Bitrate</option>
-        <option value="resolution">Highest Resolution</option>
-      </select>
-    </div>
-
-    <button class="btn" id="btn-save">Save Settings</button>
-    <p class="status" id="status"></p>
   </div>
+
+  <div class="actions">
+    <button class="btn btn-primary" id="batch-download">⬇ 下载本页全部</button>
+    <button class="btn btn-secondary" id="open-history">⌚ 历史</button>
+    <button class="btn btn-secondary" id="open-settings">⚙ 设置</button>
+  </div>
+
+  <hr class="sep">
+
+  <div class="field">
+    <label>快速切换画质</label>
+    <select id="quality">
+      <option value="highest">最高码率</option>
+      <option value="resolution">最高分辨率</option>
+      <option value="nowatermark">无水印优先</option>
+    </select>
+  </div>
+
+  <p class="status" id="status"></p>
+
   <script src="popup.js"></script>
 </body>
 </html>
