@@ -1,6 +1,9 @@
 // TikDownload Background - Service Worker
 const LOG = (...args) => console.log('[TikDownload BG]', ...args);
 
+// --- Session stats ---
+const sessionStats = { downloaded: 0, failed: 0 };
+
 // --- Saved API parameters (captured from webRequest) ---
 const savedParams = new Map(); // timestamp -> [[key, value], ...]
 const PARAMS_TO_SKIP = new Set(['a_bogus', 'fp', 'verifyFp', 'msToken']);
@@ -182,9 +185,9 @@ function pickBestImageUrl(urlList) {
 
 // --- Build filename ---
 function sanitize(name) {
+  // Whitelist: ASCII word chars, CJK, kana, hangul, safe punctuation
   return name
-    .replace(/[<>:"/\\|?*#\n\r\t]/g, '_')
-    .replace(/[。，！？；：""''【】《》（）～…·]/g, '_')
+    .replace(/[^\w\s一-鿿㐀-䶿぀-ヿ가-힯.\-]/g, '')
     .replace(/\s+/g, ' ')
     .replace(/_+/g, '_')
     .replace(/^[.\s_]+|[.\s_]+$/g, '')
@@ -225,17 +228,42 @@ async function buildFilename(info, url, index) {
   return `${folder}/${sanitize(author)}/${filename}`;
 }
 
+// --- Download history persistence ---
+async function recordDownload(vid, info, status, error) {
+  const { downloadHistory = [] } = await chrome.storage.local.get(['downloadHistory']);
+  const existing = downloadHistory.findIndex(h => h.vid === vid);
+  const record = {
+    vid,
+    title: info?.description?.substring(0, 80) || '',
+    creator: info?.creator || 'unknown',
+    status,
+    error: error || null,
+    timestamp: Date.now()
+  };
+  if (existing >= 0) {
+    downloadHistory[existing] = record;
+  } else {
+    downloadHistory.push(record);
+  }
+  if (downloadHistory.length > 500) downloadHistory.splice(0, downloadHistory.length - 500);
+  await chrome.storage.local.set({ downloadHistory });
+}
+
 // --- Download ---
 async function downloadPost(vid) {
   LOG('Download requested for vid:', vid);
 
   const detail = await fetchAwemeDetail(vid);
   if (!detail) {
+    await recordDownload(vid, null, 'failed', 'Failed to fetch video detail');
+    sessionStats.failed++;
     return { ok: false, error: 'Failed to fetch video detail. Browse more to capture API params.' };
   }
 
   const info = extractVideoInfo(detail);
   if (!info || (info.videos.length === 0 && info.images.length === 0)) {
+    await recordDownload(vid, info, 'failed', 'No downloadable media found');
+    sessionStats.failed++;
     return { ok: false, error: 'No downloadable media found' };
   }
 
@@ -273,6 +301,14 @@ async function downloadPost(vid) {
     if (i < allUrls.length - 1) await new Promise(r => setTimeout(r, 300));
   }
 
+  if (count > 0) {
+    await recordDownload(vid, info, 'success', null);
+    sessionStats.downloaded++;
+  } else {
+    await recordDownload(vid, info, 'failed', 'All downloads failed');
+    sessionStats.failed++;
+  }
+
   return { ok: count > 0, count };
 }
 
@@ -282,6 +318,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const { vid } = msg.data;
     downloadPost(vid).then(sendResponse).catch(e => sendResponse({ ok: false, error: e.message }));
     return true;
+  }
+
+  if (msg.type === 'GET_SESSION_STATS') {
+    sendResponse({ ok: true, stats: sessionStats });
+    return false;
   }
 });
 
