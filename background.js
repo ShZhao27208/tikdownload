@@ -1,4 +1,5 @@
 // TikDownload Background - Service Worker
+importScripts('diagnostic.js');
 const LOG = (...args) => console.log('[TikDownload BG]', ...args);
 
 // --- Session stats ---
@@ -7,6 +8,7 @@ const sessionStats = { downloaded: 0, failed: 0 };
 // --- Saved API parameters (captured from webRequest) ---
 const savedParams = new Map(); // timestamp -> [[key, value], ...]
 const PARAMS_TO_SKIP = new Set(['a_bogus', 'fp', 'verifyFp', 'msToken']);
+let lastCaptureLogAt = 0;
 
 // --- Capture Douyin API request parameters ---
 function setupWebRequestListener() {
@@ -21,13 +23,17 @@ function setupWebRequestListener() {
         const entries = Array.from(params.entries());
         if (entries.length < 20) return; // Real API calls have many params
 
-        savedParams.set(Date.now(), entries);
-        LOG('Captured API params, total saved:', savedParams.size);
+        const capturedAt = Date.now();
+        savedParams.set(capturedAt, entries);
 
         // Keep only last 20 entries
         if (savedParams.size > 20) {
           const oldest = savedParams.keys().next().value;
           savedParams.delete(oldest);
+        }
+        if (capturedAt - lastCaptureLogAt >= 3000) {
+          LOG('Captured fresh API params, cache size:', savedParams.size);
+          lastCaptureLogAt = capturedAt;
         }
       } catch (e) {}
     },
@@ -113,6 +119,7 @@ function extractVideoInfo(detail) {
     description: detail.desc || '',
     timestamp: detail.create_time || 0,
     videos: [],
+    videoGroups: [],
     images: []
   };
 
@@ -126,16 +133,17 @@ function extractVideoInfo(detail) {
       const best = mp4Rates[0];
       const urlList = best.play_addr?.url_list || [];
       if (urlList.length > 0) {
-        // Pick shortest URL (usually no watermark)
-        const sorted = [...urlList].sort((a, b) => a.length - b.length);
-        info.videos.push(sorted[0]);
+        info.videoGroups.push([...new Set(urlList)]);
+        info.videos.push(urlList[0]);
       }
     }
   }
 
   // Fallback: play_addr directly
   if (info.videos.length === 0 && detail.video?.play_addr?.url_list?.length > 0) {
-    info.videos.push(detail.video.play_addr.url_list[0]);
+    const urlList = [...new Set(detail.video.play_addr.url_list)];
+    info.videoGroups.push(urlList);
+    info.videos.push(urlList[0]);
   }
 
   // Images (photo slideshow / 图集)
@@ -143,8 +151,9 @@ function extractVideoInfo(detail) {
     for (const img of detail.images) {
       // Animated image (动图) has video
       if (img.video?.play_addr?.url_list?.length > 0) {
-        const urls = img.video.play_addr.url_list;
-        info.videos.push(urls[urls.length - 1] || urls[0]);
+        const urls = [...new Set(img.video.play_addr.url_list)];
+        info.videoGroups.push(urls);
+        info.videos.push(urls[0]);
       } else if (img.url_list?.length > 0) {
         // Static image - prefer jpeg
         const url = pickBestImageUrl(img.url_list);
@@ -250,6 +259,87 @@ async function recordDownload(vid, info, status, error) {
 }
 
 // --- Download ---
+function downloadAndWait(url, filename, timeoutMs = 10 * 60 * 1000) {
+  return new Promise((resolve, reject) => {
+    let downloadId = null;
+    let timer = null;
+
+    const cleanup = () => {
+      if (timer) clearTimeout(timer);
+      chrome.downloads.onChanged.removeListener(onChanged);
+    };
+    const fail = (reason) => {
+      cleanup();
+      reject(new Error(reason));
+    };
+    const onChanged = (delta) => {
+      if (delta.id !== downloadId || !delta.state) return;
+      if (delta.state.current === 'complete') {
+        cleanup();
+        LOG('Download completed, id:', downloadId);
+        resolve(downloadId);
+      } else if (delta.state.current === 'interrupted') {
+        const reason = delta.error?.current || 'UNKNOWN_INTERRUPT';
+        LOG('Download interrupted, id:', downloadId, 'reason:', reason);
+        fail(`Chrome download interrupted: ${reason}`);
+      }
+    };
+
+    chrome.downloads.onChanged.addListener(onChanged);
+    chrome.downloads.download(
+      { url, filename, conflictAction: 'uniquify' },
+      (id) => {
+        if (chrome.runtime.lastError || !Number.isInteger(id)) {
+          fail(chrome.runtime.lastError?.message || 'Chrome did not return a download id');
+          return;
+        }
+        downloadId = id;
+        LOG('Download started, id:', downloadId, '(waiting for final state)');
+        timer = setTimeout(() => {
+          chrome.downloads.search({ id: downloadId }, (items) => {
+            const item = items?.[0];
+            if (item?.state === 'complete') {
+              cleanup();
+              resolve(downloadId);
+            } else {
+              fail(`Download status timeout${item?.error ? `: ${item.error}` : ''}`);
+            }
+          });
+        }, timeoutMs);
+      }
+    );
+  });
+}
+
+async function selectReachableMediaUrl(candidates, expectedKind) {
+  const unique = [...new Set(candidates)].filter(url => /^https?:\/\//i.test(url));
+  for (const candidate of unique) {
+    try {
+      const response = await fetch(candidate, {
+        method: 'GET',
+        headers: { Range: 'bytes=0-0' },
+        redirect: 'follow',
+        cache: 'no-store'
+      });
+      const contentType = response.headers.get('content-type') || '';
+      const validType = expectedKind === 'video'
+        ? /video|octet-stream/i.test(contentType)
+        : /image|octet-stream/i.test(contentType);
+      const reachable = (response.status === 200 || response.status === 206) && validType;
+      const finalUrl = response.url || candidate;
+      try { await response.body?.cancel(); } catch (_) {}
+      if (reachable) {
+        LOG('Selected reachable media mirror:', new URL(finalUrl).hostname, response.status, contentType);
+        return finalUrl;
+      }
+      LOG('Media mirror rejected:', new URL(candidate).hostname, response.status, contentType || 'no content-type');
+    } catch (error) {
+      LOG('Media mirror probe failed:', new URL(candidate).hostname, error?.message || error);
+    }
+  }
+  return unique[0] || '';
+}
+
 async function downloadPost(vid) {
   LOG('Download requested for vid:', vid);
 
@@ -270,46 +360,47 @@ async function downloadPost(vid) {
   LOG('Found:', info.videos.length, 'videos,', info.images.length, 'images');
   LOG('Creator:', info.creator, 'Desc:', info.description?.substring(0, 30));
 
-  const allUrls = [...info.videos, ...info.images];
+  const videoGroups = info.videoGroups.length > 0
+    ? info.videoGroups
+    : info.videos.map(url => [url]);
+  const mediaItems = [
+    ...videoGroups.map(candidates => ({ kind: 'video', candidates })),
+    ...info.images.map(url => ({ kind: 'image', candidates: [url] }))
+  ];
   let count = 0;
+  const errors = [];
 
-  for (let i = 0; i < allUrls.length; i++) {
-    const url = allUrls[i];
+  for (let i = 0; i < mediaItems.length; i++) {
+    const item = mediaItems[i];
+    const url = await selectReachableMediaUrl(item.candidates, item.kind);
+    if (!url) {
+      errors.push(`No valid URL for item ${i + 1}`);
+      continue;
+    }
     const filename = await buildFilename(info, url, i + 1);
     LOG('Downloading:', filename);
 
     try {
-      await new Promise((resolve, reject) => {
-        chrome.downloads.download(
-          { url, filename, conflictAction: 'uniquify' },
-          (downloadId) => {
-            if (chrome.runtime.lastError) {
-              LOG('Download error:', chrome.runtime.lastError.message);
-              reject(chrome.runtime.lastError.message);
-            } else {
-              LOG('Download started, id:', downloadId);
-              count++;
-              resolve(downloadId);
-            }
-          }
-        );
-      });
+      await downloadAndWait(url, filename);
+      count++;
     } catch (e) {
-      LOG('Download failed for item', i, ':', e);
+      const message = e?.message || String(e);
+      errors.push(message);
+      LOG('Download failed for item', i + 1, ':', message);
     }
 
-    if (i < allUrls.length - 1) await new Promise(r => setTimeout(r, 300));
+    if (i < mediaItems.length - 1) await new Promise(r => setTimeout(r, 300));
   }
 
   if (count > 0) {
     await recordDownload(vid, info, 'success', null);
     sessionStats.downloaded++;
   } else {
-    await recordDownload(vid, info, 'failed', 'All downloads failed');
+    await recordDownload(vid, info, 'failed', errors.join('; ') || 'All downloads failed');
     sessionStats.failed++;
   }
 
-  return { ok: count > 0, count };
+  return { ok: count > 0, count, errors };
 }
 
 // --- Message handler ---
@@ -323,6 +414,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'GET_SESSION_STATS') {
     sendResponse({ ok: true, stats: sessionStats });
     return false;
+  }
+
+  if (msg.type === 'RUN_DOWNLOAD_DIAGNOSTIC') {
+    runDownloadDiagnostic(msg.data || {})
+      .then(report => sendResponse({ ok: true, report }))
+      .catch(error => sendResponse({ ok: false, error: error.message }));
+    return true;
   }
 });
 
