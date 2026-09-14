@@ -19,12 +19,13 @@
   document.body.appendChild(s);
   s.onload = () => s.remove();
 
-  // --- Forward FETCH_AWEME_DETAIL_REQ from background to page ---
-  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (msg.type === 'FETCH_AWEME_DETAIL_REQ') {
-      window.postMessage({ type: 'FETCH_AWEME_DETAIL_REQ', data: msg.data }, '*');
-      sendResponse({ ok: true });
-      return false;
+  // --- Forward intercepted aweme details from page context to background ---
+  window.addEventListener('message', (event) => {
+    if (event.data?.type === 'TIKDOWNLOAD_AWEME_CACHE') {
+      chrome.runtime.sendMessage({
+        type: 'AWEME_DETAIL_CACHE',
+        data: { vid: event.data.vid, detail: event.data.detail }
+      }).catch(() => {});
     }
   });
 

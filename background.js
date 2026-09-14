@@ -1,5 +1,4 @@
 // TikDownload Background - Service Worker
-importScripts('diagnostic.js');
 const LOG = (...args) => console.log('[TikDownload BG]', ...args);
 
 // --- Session stats ---
@@ -7,8 +6,12 @@ const sessionStats = { downloaded: 0, failed: 0 };
 
 // --- Saved API parameters (captured from webRequest) ---
 const savedParams = new Map(); // timestamp -> [[key, value], ...]
-const PARAMS_TO_SKIP = new Set(['a_bogus', 'fp', 'verifyFp', 'msToken']);
+const PARAMS_TO_SKIP = new Set(['a_bogus', 'X-Bogus', 'fp', 'verifyFp', 'msToken', '_signature']);
 let lastCaptureLogAt = 0;
+
+// --- Cached aweme details (intercepted from page API responses) ---
+const awemeDetailCache = new Map();
+const CACHE_TTL = 10 * 60 * 1000;
 
 // --- Capture Douyin API request parameters ---
 function setupWebRequestListener() {
@@ -53,6 +56,7 @@ function getLatestParams() {
 function buildDouyinDetailUrl(vid, params) {
   const url = new URL('https://www.douyin.com/aweme/v1/web/aweme/detail/');
   for (const [key, value] of params) {
+    if (PARAMS_TO_SKIP.has(key)) continue;
     if (key === 'aweme_id') {
       url.searchParams.append('aweme_id', vid);
     } else {
@@ -65,8 +69,41 @@ function buildDouyinDetailUrl(vid, params) {
   return url.toString();
 }
 
+// --- Fetch via page context (same-origin with cookies) ---
+async function fetchViaTab(url) {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) return null;
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      world: 'MAIN',
+      func: async (fetchUrl) => {
+        try {
+          const r = await fetch(fetchUrl, { credentials: 'include' });
+          if (!r.ok) return { _err: r.status };
+          return await r.json();
+        } catch (e) {
+          return { _err: String(e) };
+        }
+      },
+      args: [url]
+    });
+    return results?.[0]?.result || null;
+  } catch (e) {
+    LOG('Page-context fetch error:', e.message);
+    return null;
+  }
+}
+
 // --- Fetch aweme detail ---
 async function fetchAwemeDetail(vid) {
+  // 1. Check intercepted cache
+  const cached = awemeDetailCache.get(vid);
+  if (cached && (Date.now() - cached.cachedAt < CACHE_TTL)) {
+    LOG('Using cached aweme detail for', vid);
+    return cached.detail;
+  }
+
   const params = getLatestParams();
   if (!params) {
     LOG('No saved params available');
@@ -76,6 +113,18 @@ async function fetchAwemeDetail(vid) {
   const url = buildDouyinDetailUrl(vid, params);
   LOG('Fetching aweme detail:', url.substring(0, 100));
 
+  // 2. Page-context fetch (same-origin, has cookies)
+  const pageResult = await fetchViaTab(url);
+  if (pageResult && !pageResult._err) {
+    if (pageResult.aweme_detail) {
+      LOG('Page-context fetch succeeded');
+      awemeDetailCache.set(vid, { detail: pageResult.aweme_detail, cachedAt: Date.now() });
+      return pageResult.aweme_detail;
+    }
+  }
+  if (pageResult?._err) LOG('Page-context fetch failed:', pageResult._err);
+
+  // 3. Fallback: service worker fetch
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const resp = await fetch(url);
@@ -92,19 +141,6 @@ async function fetchAwemeDetail(vid) {
     }
     await new Promise(r => setTimeout(r, 200));
   }
-
-  // Fallback: ask content script to fetch via page context
-  LOG('Service worker fetch failed, trying page context...');
-  try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tab?.id) {
-      await chrome.tabs.sendMessage(tab.id, {
-        type: 'FETCH_AWEME_DETAIL_REQ',
-        data: { url }
-      });
-      await new Promise(r => setTimeout(r, 2000));
-    }
-  } catch (e) {}
 
   return null;
 }
@@ -416,12 +452,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false;
   }
 
-  if (msg.type === 'RUN_DOWNLOAD_DIAGNOSTIC') {
-    runDownloadDiagnostic(msg.data || {})
-      .then(report => sendResponse({ ok: true, report }))
-      .catch(error => sendResponse({ ok: false, error: error.message }));
-    return true;
+  if (msg.type === 'AWEME_DETAIL_CACHE') {
+    const { vid, detail } = msg.data || {};
+    if (vid && detail) {
+      awemeDetailCache.set(vid, { detail, cachedAt: Date.now() });
+      if (awemeDetailCache.size > 200) {
+        const oldest = awemeDetailCache.keys().next().value;
+        awemeDetailCache.delete(oldest);
+      }
+    }
+    return false;
   }
+
 });
 
 // --- Init ---
