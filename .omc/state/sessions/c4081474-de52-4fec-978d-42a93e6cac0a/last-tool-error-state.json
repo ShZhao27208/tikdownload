@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"https_proxy=http://10.255.255.254:7897 http_proxy=http://10.255.255.254:7897 git push 2>&1\",\"timeout\":60000}",
+  "error": "Exit code 128\nfatal: unable to access 'https://github.com/ShZhao27208/tikdownload.git/': Failed to connect to github.com port 443 via 10.255.255.254 after 0 ms: Could not connect to server",
+  "timestamp": "2026-09-14T14:42:25.676Z",
+  "retry_count": 3
+}
